@@ -1,16 +1,67 @@
 # Copyright (c) 2011 Cloudera, Inc. All rights reserved.
 
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.2.3)
 
+# where to find cmake modules
 set(CMAKE_MODULE_PATH cmake_modules $ENV{IMPALA_HOME}/cmake_modules)
-SET(CXX_COMMON_FLAGS "-Wall -Wno-sign-compare -Werror -pthread")
-# Suppress unused local typedef warnings on gcc and clang
-SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-local-typedefs")
-SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-local-typedef")
-SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG")
+
+# compiler flags that are common across debug/release builds
+#  -Wall: Enable all warnings.
+#  -Wno-sign-compare: suppress warnings for comparison between signed and unsigned
+#    integers
+#   -fno-strict-aliasing: disable optimizations that assume strict aliasing. This
+#       is unsafe to do if the code uses casts (which we obviously do).
+#  -Wno-unknown-pragmas: suppress warnings for unknown (compiler specific) pragmas
+#  -fsigned-char: on aarch64 platform, type of char default is unsigned char, here
+#        set it to signed-char to be compatible with x86-64
+#  -Wno-deprecated: gutil contains deprecated headers
+#  -Wno-vla: we use C99-style variable-length arrays
+#  -pthread: enable multithreaded malloc
+#  -DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG: enable nanosecond precision for boost
+#  -fno-omit-frame-pointers: Keep frame pointer for functions in register
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -march=armv8-a+crc")
+endif()
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wall -Wno-sign-compare -Wno-unknown-pragmas -pthread")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -fno-strict-aliasing -fno-omit-frame-pointer")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -fsigned-char")
 SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -std=c++14")
-SET(CXX_FLAGS_DEBUG "-ggdb")
-SET(CXX_FLAGS_RELEASE "-O3 -g -DNDEBUG -Wno-strict-aliasing")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-deprecated -Wno-vla")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_SYSTEM_NO_DEPRECATED")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -B $ENV{IMPALA_TOOLCHAIN_PACKAGES_HOME}/binutils-$ENV{IMPALA_BINUTILS_VERSION}/bin/")
+IF($ENV{USE_GOLD_LINKER} STREQUAL "true")
+  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -fuse-ld=gold")
+ENDIF()
+
+# For any gcc builds:
+#   -g: Enable symbols for profiler tools
+#   -Wno-unused-local-typedefs: Do not warn for local typedefs that are unused.
+SET(CXX_GCC_FLAGS "-g -Wno-unused-local-typedefs")
+if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0)
+  # We need to add additional arguments for GCC 7+. We go down this branch if building
+  # with a non-GCC compiler of version 7+, but in that case CXX_GCC_FLAGS is not used,
+  # so it is inconsequential. TODO: IMPALA-5490: make this non-conditional when we
+  # upgrade GCC.
+  #  -faligned-new: new will automatically align types. Otherwise "new Counter()" in the
+  #       Kudu util code produces a warning (see KUDU-2094).
+  #   TODO: -faligned-new is part of C++17, remove flag when we bump language version.
+  SET(CXX_GCC_FLAGS "${CXX_GCC_FLAGS} -faligned-new")
+endif()
+
+# compiler flags for different build types (run 'cmake -DCMAKE_BUILD_TYPE=<type> .')
+# For CMAKE_BUILD_TYPE=Debug
+#   -ggdb: Enable gdb debugging
+# For CMAKE_BUILD_TYPE=Release
+#   -O3: Enable all compiler optimizations
+#   -DNDEBUG: Turn off dchecks/asserts/debug only code.
+#
+# Debug information is stored as dwarf2 to be as compatible as possible
+SET(CXX_FLAGS_DEBUG "${CXX_GCC_FLAGS} -ggdb -gdwarf-2")
+# -Werror: compile warnings should be errors when using the toolchain compiler.
+#   Enabled for DEBUG, ASAN, TSAN and UBSAN builds which are built pre-commit.
+SET(CXX_FLAGS_DEBUG "${CXX_FLAGS_DEBUG} -Werror")
+SET(CXX_FLAGS_RELEASE "${CXX_GCC_FLAGS} -O3 -DNDEBUG -gdwarf-2")
 
 # if no build build type is specified, default to debug builds
 if (NOT CMAKE_BUILD_TYPE)
@@ -31,10 +82,10 @@ function(set_dep_root NAME)
   string(TOLOWER ${NAME} NAME_LOWER)
   string(REPLACE "_" "-" NAME_LOWER ${NAME_LOWER})
   set(VAL_NAME "IMPALA_${NAME}_VERSION")
-  set(${NAME}_ROOT $ENV{IMPALA_TOOLCHAIN}/${NAME_LOWER}-$ENV{${VAL_NAME}} PARENT_SCOPE)
+  set(${NAME}_ROOT $ENV{IMPALA_TOOLCHAIN_PACKAGES_HOME}/${NAME_LOWER}-$ENV{${VAL_NAME}} PARENT_SCOPE)
 endfunction()
 
-set(ENV{BOOST_ROOT} "$ENV{IMPALA_TOOLCHAIN}/boost-$ENV{IMPALA_BOOST_VERSION}")
+set(ENV{BOOST_ROOT} "$ENV{IMPALA_TOOLCHAIN_PACKAGES_HOME}/boost-$ENV{IMPALA_BOOST_VERSION}")
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 set_dep_root(GFLAGS)

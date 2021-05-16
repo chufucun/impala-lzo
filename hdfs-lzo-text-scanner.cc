@@ -175,7 +175,7 @@ Status HdfsLzoTextScanner::LzoIssueInitialRangesImpl(HdfsScanNodeBase* scan_node
 
 Status HdfsLzoTextScanner::IssueFileRanges(const char* filename) {
   DCHECK(header_ != nullptr);
-  HdfsFileDesc* file_desc = scan_node_->GetFileDesc(
+  const HdfsFileDesc* file_desc = scan_node_->GetFileDesc(
       context_->partition_descriptor()->id(), filename);
   if (header_->offsets.empty()) {
     // If offsets is empty then there was no index file.  The file cannot be split.
